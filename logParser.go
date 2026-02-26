@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-func ParseEntry(entry string, data *Data) {
+func parseEntry(entry string, data *Data, gp GeolocationParser) {
 	re := regexp.MustCompile(`^(\S+) .*?"[^"]*" \d+ \d+ "[^"]*" "([^"]+)"`)
 	matches := re.FindStringSubmatch(entry)
 
@@ -22,7 +22,7 @@ func ParseEntry(entry string, data *Data) {
 	userAgent := matches[2]
 
 	// Parse country
-	countryName := GetCountryFromIP(ip)
+	countryName := gp.GetCountryFromIP(ip)
 	data.countriesMap[countryName]++
 	data.countriesCount++
 
@@ -52,7 +52,7 @@ func ParseEntry(entry string, data *Data) {
 	data.osCount++
 }
 
-func ProcessLogFile(logFilePath string, data *Data) {
+func ProcessLogFile(logFilePath string, data *Data, gp GeolocationParser) {
 	file, err := os.Open(logFilePath)
 	if err != nil {
 		log.Fatalf("failed to open file: %v", err)
@@ -63,7 +63,7 @@ func ProcessLogFile(logFilePath string, data *Data) {
 
 	for scanner.Scan() {
 		entry := scanner.Text()
-		ParseEntry(entry, data)
+		parseEntry(entry, data, gp)
 	}
 
 	if err := scanner.Err(); err != nil {

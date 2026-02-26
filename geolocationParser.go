@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/csv"
 	"fmt"
+	"log"
 	"os"
 	"sort"
 	"strings"
@@ -11,15 +12,34 @@ import (
 	"inet.af/netaddr"
 )
 
+type GeolocationParser interface {
+	Init(countriesFile string, geolocationsFile string)
+	GetCountryFromIP(ip string) string
+}
+
 type Block struct {
 	Prefix netaddr.IPPrefix
 	Line   string
 }
 
-var blocks []Block
-var countriesToGeoMap = make(map[string]string)
+type GeolocationParser_EN_IPV4 struct {
+	blocks            []Block
+	countriesToGeoMap map[string]string
+}
 
-func LoadCountries(countriesFile string) error {
+func (gp *GeolocationParser_EN_IPV4) Init(countriesFile string, geolocationsFile string) {
+	gp.countriesToGeoMap = make(map[string]string)
+	err := gp.loadCountries(countriesFile)
+	if err != nil {
+		log.Fatalf("failed to open file: %v", err)
+	}
+	gp.loadGeolocations(geolocationsFile)
+	if err != nil {
+		log.Fatalf("failed to open file: %v", err)
+	}
+}
+
+func (gp *GeolocationParser_EN_IPV4) loadCountries(countriesFile string) error {
 	file, err := os.Open(countriesFile)
 	if err != nil {
 		return err
@@ -54,7 +74,7 @@ func LoadCountries(countriesFile string) error {
 		countryName = strings.TrimSpace(countryName)
 
 		if id != "" && countryName != "" {
-			countriesToGeoMap[id] = countryName
+			gp.countriesToGeoMap[id] = countryName
 		}
 	}
 
@@ -62,8 +82,8 @@ func LoadCountries(countriesFile string) error {
 	return nil
 }
 
-func LoadGeolocations(filename string) error {
-	file, err := os.Open(filename)
+func (gp *GeolocationParser_EN_IPV4) loadGeolocations(geolocationsFile string) error {
+	file, err := os.Open(geolocationsFile)
 	if err != nil {
 		return err
 	}
@@ -97,22 +117,28 @@ func LoadGeolocations(filename string) error {
 			continue
 		}
 
-		blocks = append(blocks, Block{
+		gp.blocks = append(gp.blocks, Block{
 			Prefix: prefix,
 			Line:   strings.Join(record, ","),
 		})
 	}
 
 	// Sort by starting IP of the prefix
-	sort.Slice(blocks, func(i, j int) bool {
-		return blocks[i].Prefix.Masked().IP().Compare(blocks[j].Prefix.Masked().IP()) < 0
+	sort.Slice(gp.blocks, func(i, j int) bool {
+		return gp.blocks[i].Prefix.Masked().IP().Compare(gp.blocks[j].Prefix.Masked().IP()) < 0
 	})
 
 	// No errors
 	return nil
 }
 
-func GetGeonameIDFromIP(ipStr string) string {
+func (gp *GeolocationParser_EN_IPV4) GetCountryFromIP(ip string) string {
+	geonameID := gp.getGeonameIDFromIP(ip)
+	countryName := gp.getCountryFromGeonameID(geonameID)
+	return countryName
+}
+
+func (gp *GeolocationParser_EN_IPV4) getGeonameIDFromIP(ipStr string) string {
 	block := &Block{}
 	var geonameId string
 
@@ -122,13 +148,13 @@ func GetGeonameIDFromIP(ipStr string) string {
 		return ""
 	}
 
-	low, high := 0, len(blocks)-1
+	low, high := 0, len(gp.blocks)-1
 	for low <= high {
 		mid := (low + high) / 2
-		p := blocks[mid].Prefix
+		p := gp.blocks[mid].Prefix
 
 		if p.Contains(ip) {
-			block = &blocks[mid]
+			block = &gp.blocks[mid]
 		}
 
 		if ip.Less(p.Masked().IP()) {
@@ -150,14 +176,8 @@ func GetGeonameIDFromIP(ipStr string) string {
 
 }
 
-func GetCountryFromIP(ip string) string {
-	geonameID := GetGeonameIDFromIP(ip)
-	countryName := GetCountryFromGeonameID(geonameID)
-	return countryName
-}
-
-func GetCountryFromGeonameID(geonameID string) string {
-	if name, ok := countriesToGeoMap[geonameID]; ok {
+func (gp *GeolocationParser_EN_IPV4) getCountryFromGeonameID(geonameID string) string {
+	if name, ok := gp.countriesToGeoMap[geonameID]; ok {
 		return name
 	}
 	return "Unknown"
